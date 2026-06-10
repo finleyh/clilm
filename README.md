@@ -11,8 +11,17 @@ cached, serving never touches the network.
 - [uv](https://docs.astral.sh/uv/) — `brew install uv`
 - Docker Desktop (only if containers are the consumer)
 
-No venv or `pip install` needed — the script carries its own dependency metadata and
-uv builds an isolated environment on first run.
+No venv or `pip install` needed — the script carries its own dependency metadata
+(the `# /// script` block at the top) and uv builds an isolated environment with
+Python 3.11+ on first run. `mlxctl.py.lock` pins exact dependency versions, so keep
+it next to the script for reproducible installs.
+
+> **Run it exactly like this:** `uv run mlxctl.py ...` (or `./mlxctl.py ...`).
+>
+> Do **not** run `uv run python mlxctl.py` or `python3 mlxctl.py` — putting `python`
+> in the middle makes uv ignore the embedded dependency block entirely, so you get a
+> bare interpreter with no deps (symptoms: `unsupported operand type` on a type hint,
+> or `ModuleNotFoundError: mlx_lm`).
 
 ## Install
 
@@ -20,6 +29,10 @@ uv builds an isolated environment on first run.
 chmod +x mlxctl.py
 ln -s "$(pwd)/mlxctl.py" /usr/local/bin/mlxctl   # optional, or just ./mlxctl.py
 ```
+
+The pinned lockfile (`mlxctl.py.lock`) is committed. Regenerate it after changing
+the dependency block with `uv lock --script mlxctl.py`; `uv run` consumes it
+automatically for reproducible installs.
 
 ## Quick start
 
