@@ -1,0 +1,14 @@
+[project]
+name = "mlxctl"
+version = "0.1.0"
+description = "Pull and serve MLX models locally for Docker Desktop containers"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "mlx-lm>=0.24.0",
+    "huggingface-hub>=0.30.0",
+]
+
+# Single loose script, not an installable package — uv just manages the env.
+[tool.uv]
+package = false

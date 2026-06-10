@@ -11,36 +11,38 @@ cached, serving never touches the network.
 - [uv](https://docs.astral.sh/uv/) — `brew install uv`
 - Docker Desktop (only if containers are the consumer)
 
-No venv or `pip install` needed — the script carries its own dependency metadata
-(the `# /// script` block at the top) and uv builds an isolated environment with
-Python 3.11+ on first run. `mlxctl.py.lock` pins exact dependency versions, so keep
-it next to the script for reproducible installs.
-
-> **Run it exactly like this:** `uv run mlxctl.py ...` (or `./mlxctl.py ...`).
->
-> Do **not** run `uv run python mlxctl.py` or `python3 mlxctl.py` — putting `python`
-> in the middle makes uv ignore the embedded dependency block entirely, so you get a
-> bare interpreter with no deps (symptoms: `unsupported operand type` on a type hint,
-> or `ModuleNotFoundError: mlx_lm`).
+This is a uv project. Dependencies are declared openly in `pyproject.toml` and
+pinned in `uv.lock` — nothing hidden. No manual venv or `pip install`: `uv run`
+creates the environment, installs the locked deps, and runs the script.
 
 ## Install
 
 ```sh
-chmod +x mlxctl.py
-ln -s "$(pwd)/mlxctl.py" /usr/local/bin/mlxctl   # optional, or just ./mlxctl.py
+uv sync                      # build the env from uv.lock (first run; optional)
 ```
 
-The pinned lockfile (`mlxctl.py.lock`) is committed. Regenerate it after changing
-the dependency block with `uv lock --script mlxctl.py`; `uv run` consumes it
-automatically for reproducible installs.
+`uv.lock` is generated automatically the first time you run anything (`uv run` /
+`uv sync`). Commit it for reproducible installs; regenerate after editing
+dependencies in `pyproject.toml` with `uv lock`.
 
 ## Quick start
 
+Run every command as `uv run python mlxctl.py <command>` — uv syncs the locked
+environment first, so `mlx_lm` is always present:
+
 ```sh
-mlxctl pull qwen3-30b        # download (one-time, needs network)
-mlxctl serve qwen3-30b       # serve in the background on port 8080
-mlxctl status                # pid, model, uptime, health, endpoints
-mlxctl stop                  # unload the model, free the RAM
+uv run python mlxctl.py pull qwen3-30b     # download (one-time, needs network)
+uv run python mlxctl.py serve qwen3-30b    # serve in the background on port 8080
+uv run python mlxctl.py status             # pid, model, uptime, health, endpoints
+uv run python mlxctl.py stop               # unload the model, free the RAM
+```
+
+Tired of typing the prefix? Drop a one-line wrapper on your PATH:
+
+```sh
+printf '#!/bin/sh\nexec uv run --project "%s" python "%s/mlxctl.py" "$@"\n' \
+  "$(pwd)" "$(pwd)" > /usr/local/bin/mlxctl && chmod +x /usr/local/bin/mlxctl
+# then:  mlxctl serve qwen3-30b
 ```
 
 `serve` detaches and returns once the model answers health checks. Endpoints:

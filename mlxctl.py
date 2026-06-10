@@ -1,12 +1,8 @@
-#!/usr/bin/env -S uv run --script
-# /// script
-# requires-python = ">=3.11"
-# dependencies = [
-#   "mlx-lm>=0.24.0",
-#   "huggingface_hub>=0.30.0",
-# ]
-# ///
+#!/usr/bin/env python3
 """mlxctl — pull and serve MLX models locally for Docker Desktop containers.
+
+Dependencies are declared in pyproject.toml and pinned in uv.lock.
+Run via:  uv run python mlxctl.py <command>   (uv builds/syncs the env first).
 
 Models run on the host (Metal GPU is not available inside containers).
 Containers reach the server at http://host.docker.internal:<port>/v1.
@@ -298,17 +294,17 @@ def cmd_nicknames(args):
 
 
 def _check_environment():
-    """Fail loudly and helpfully if the deps aren't here — usually means
-    'python' was wrongly put in the command, so uv skipped the # /// script block."""
+    """Fail loudly and helpfully if deps aren't here — usually means the script
+    was run with a bare interpreter instead of through uv's project env."""
     import importlib.util
 
     if importlib.util.find_spec("mlx_lm") is None:
         sys.exit(
             "mlx_lm is not available in this environment.\n\n"
-            "This almost always means you ran:   uv run python mlxctl.py ...\n"
-            "Putting 'python' in the middle makes uv ignore the inline dependency\n"
-            "block. Run it WITHOUT 'python':\n\n"
-            "    uv run mlxctl.py serve <model>      (or  ./mlxctl.py serve <model>)\n"
+            "Run mlxctl through uv so it loads the locked project dependencies:\n\n"
+            "    uv run python mlxctl.py serve <model>\n\n"
+            "(plain `python mlxctl.py` uses a bare interpreter with no deps;\n"
+            " `uv sync` once will also populate the env.)\n"
         )
 
 
