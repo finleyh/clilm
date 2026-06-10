@@ -31,8 +31,8 @@ Run every command as `uv run python mlxctl.py <command>` — uv syncs the locked
 environment first, so `mlx_lm` is always present:
 
 ```sh
-uv run python mlxctl.py pull mistral-24b   # download (one-time, needs network)
-uv run python mlxctl.py serve mistral-24b  # serve in the background on port 8080
+uv run python mlxctl.py pull daredevil     # download (one-time, needs network)
+uv run python mlxctl.py serve daredevil    # serve in the background on port 8080
 uv run python mlxctl.py status             # pid, model, uptime, health, endpoints
 uv run python mlxctl.py stop               # unload the model, free the RAM
 ```
@@ -42,7 +42,7 @@ Tired of typing the prefix? Drop a one-line wrapper on your PATH:
 ```sh
 printf '#!/bin/sh\nexec uv run --project "%s" python "%s/mlxctl.py" "$@"\n' \
   "$(pwd)" "$(pwd)" > /usr/local/bin/mlxctl && chmod +x /usr/local/bin/mlxctl
-# then:  mlxctl serve mistral-24b
+# then:  mlxctl serve daredevil
 ```
 
 `serve` detaches and returns once the model answers health checks. Endpoints:
@@ -57,7 +57,7 @@ printf '#!/bin/sh\nexec uv run --project "%s" python "%s/mlxctl.py" "$@"\n' \
 | Command | What it does |
 |---|---|
 | `pull <model>` | Download by nickname or full HF repo id |
-| `serve [model]` | Serve in background (default model: `mistral-24b`). Serving while another model runs stops it first — at most one model resident |
+| `serve [model]` | Serve in background (default model: `daredevil`). Serving while another model runs stops it first — at most one model resident |
 | `serve --foreground` | Run attached, for debugging |
 | `stop` | SIGTERM the server, clean up pidfile |
 | `status` | Running state, model, uptime, health ping, endpoints |
@@ -77,12 +77,10 @@ authorized security work; you own how you use them.
 
 | Nickname | Repo | Notes |
 |---|---|---|
-| `mistral-24b` | mlx-community/Mistral-Small-24B-Instruct-2501-abliterated-4-bit | **default** — strong generalist, ~13 GB |
-| `qwen-coder-32b` | mlx-community/Qwen2.5-Coder-32B-Instruct-abliterated-4bit | best for scripting/tooling, ~18 GB |
-| `qwen-14b` | mlx-community/Josiefied-Qwen2.5-14B-Instruct-abliterated-v4-4-bit | balanced mid-size, ~8 GB |
-| `daredevil-8b` | mlx-community/NeuralDaredevil-8B-abliterated-4bit | popular uncensored 8B, ~4.5 GB |
-| `llama-8b` | mlx-community/Meta-Llama-3.1-8B-Instruct-abliterated-4bit | reliable fallback, ~4.5 GB |
-| `qwen-3b` | mlx-community/Josiefied-Qwen2.5-3B-Instruct-abliterated-v1-4-bit | quick/cheap queries, ~1.8 GB |
+| `daredevil` | mlx-community/NeuralDaredevil-8B-abliterated-4bit | **default** — fast 8B, ~4.5 GB |
+| `llama` | mlx-community/Meta-Llama-3.1-8B-Instruct-abliterated-4bit | 8B fallback, ~4.5 GB |
+| `mistral` | mlx-community/Mistral-Small-24B-Instruct-2501-abliterated-4-bit | 24B generalist, ~13 GB |
+| `qwen` | mlx-community/Qwen2.5-Coder-32B-Instruct-abliterated-4bit | 32B coder/tooling, ~18 GB |
 
 Anything else works by full repo id: `mlxctl pull mlx-community/SomeModel-4bit`.
 
