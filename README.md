@@ -25,6 +25,17 @@ uv sync                      # build the env from uv.lock (first run; optional)
 `uv sync`). Commit it for reproducible installs; regenerate after editing
 dependencies in `pyproject.toml` with `uv lock`.
 
+### Hugging Face token (avoid download throttling)
+
+```sh
+cp .env.example .env     # then paste your token into .env
+```
+
+mlxctl loads `.env` automatically (via python-dotenv), so `mlxctl pull` runs
+authenticated and won't get rate-limited. `.env` is gitignored. A read-scope token
+from <https://huggingface.co/settings/tokens> is enough; it also unlocks gated
+repos. Any `HF_TOKEN` already exported in your shell takes precedence over `.env`.
+
 ## Quick start
 
 Run every command as `uv run python mlxctl.py <command>` — uv syncs the locked

@@ -54,6 +54,12 @@ def display_name(repo_id: str) -> str:
     return f"{nick} ({repo_id})" if nick else repo_id
 
 
+def hf_token() -> str | None:
+    """Hugging Face token from the environment, for higher download rate limits.
+    Checks HF_TOKEN first, then huggingface_hub's own HUGGING_FACE_HUB_TOKEN."""
+    return os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+
+
 def cached_path(repo_id: str) -> str | None:
     """Return local snapshot path if fully cached, else None. No network."""
     from huggingface_hub import snapshot_download
@@ -102,10 +108,12 @@ def health_ok(port: int) -> bool:
 
 def cmd_pull(args):
     repo_id = resolve(args.model)
-    print(f"Pulling {display_name(repo_id)} ...")
+    token = hf_token()
+    auth = "authenticated" if token else "anonymous — set HF_TOKEN to avoid throttling"
+    print(f"Pulling {display_name(repo_id)} ... ({auth})")
     from huggingface_hub import snapshot_download
 
-    path = snapshot_download(repo_id)
+    path = snapshot_download(repo_id, token=token)
     print(f"Cached at {path}")
 
 
@@ -294,6 +302,16 @@ def cmd_nicknames(args):
         print(f"{nick:<{w}}  {repo}{d}")
 
 
+def load_env():
+    """Load a local .env (HF_TOKEN, etc.) if python-dotenv is present.
+    Does not override variables already set in the real environment."""
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+    load_dotenv()
+
+
 def _check_environment():
     """Fail loudly and helpfully if deps aren't here — usually means the script
     was run with a bare interpreter instead of through uv's project env."""
@@ -310,6 +328,7 @@ def _check_environment():
 
 
 def main():
+    load_env()
     _check_environment()
     p = argparse.ArgumentParser(
         prog="mlxctl",
