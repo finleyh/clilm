@@ -12,6 +12,8 @@ Models run on the host (Metal GPU is not available inside containers).
 Containers reach the server at http://host.docker.internal:<port>/v1.
 """
 
+from __future__ import annotations  # keep `x | None` hints from crashing on older interpreters
+
 import argparse
 import json
 import os
@@ -295,7 +297,23 @@ def cmd_nicknames(args):
         print(f"{nick:<{w}}  {repo}{d}")
 
 
+def _check_environment():
+    """Fail loudly and helpfully if the deps aren't here — usually means
+    'python' was wrongly put in the command, so uv skipped the # /// script block."""
+    import importlib.util
+
+    if importlib.util.find_spec("mlx_lm") is None:
+        sys.exit(
+            "mlx_lm is not available in this environment.\n\n"
+            "This almost always means you ran:   uv run python mlxctl.py ...\n"
+            "Putting 'python' in the middle makes uv ignore the inline dependency\n"
+            "block. Run it WITHOUT 'python':\n\n"
+            "    uv run mlxctl.py serve <model>      (or  ./mlxctl.py serve <model>)\n"
+        )
+
+
 def main():
+    _check_environment()
     p = argparse.ArgumentParser(
         prog="mlxctl",
         description="Pull and serve MLX models locally for Docker Desktop containers.",
