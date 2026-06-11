@@ -44,3 +44,4 @@ elif looks_textual:
 else:
     print("VERDICT: ❌ No tool call at all — model just chatted.")
     print("         Fix: switch to a stronger tool-calling model (`mlxctl serve qwen`).")
+PY
