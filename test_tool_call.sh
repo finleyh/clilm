@@ -20,10 +20,27 @@ curl -s "$URL/v1/chat/completions" \
       "name":"get_weather",
       "description":"Get the current weather for a city.",
       "parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}]
-  }' | python3 -m json.tool
+  }' | python3 - <<'PY'
+import sys, json
+try:
+    data = json.load(sys.stdin)
+except Exception as e:
+    print("Could not parse response:", e); sys.exit(1)
 
-echo
-echo "─────────────────────────────────────────────"
-echo "Look at choices[0].message above:"
-echo "  • has a \"tool_calls\" array  -> server emits structured calls (problem is our side)"
-echo "  • only \"content\" text/JSON  -> no structured calls (switch to qwen / add fallback parser)"
+msg = (data.get("choices") or [{}])[0].get("message", {})
+print(json.dumps(msg, indent=2))
+print("\n─────────────────────────────────────────────")
+
+tc = msg.get("tool_calls")
+content = (msg.get("content") or "").strip()
+looks_textual = any(k in content for k in ("get_weather", "<tool_call", '"name"', "function"))
+
+if tc:
+    print("VERDICT: ✅ STRUCTURED tool_calls returned.")
+    print("         The server+model are fine — the issue is on the client side.")
+elif looks_textual:
+    print("VERDICT: ⚠️  Tool call came back as TEXT inside content (not structured).")
+    print("         Fix: try `qwen`, and/or add the client fallback parser.")
+else:
+    print("VERDICT: ❌ No tool call at all — model just chatted.")
+    print("         Fix: switch to a stronger tool-calling model (`mlxctl serve qwen`).")
