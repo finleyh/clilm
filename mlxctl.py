@@ -29,17 +29,14 @@ LOG_FILE = STATE_DIR / "server.log"
 DEFAULT_PORT = 8080
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_MAX_TOKENS = 32768
-DEFAULT_MODEL = "daredevil"
+DEFAULT_MODEL = "qwen"
 HEALTH_TIMEOUT = 300  # seconds to wait for model load before giving up
 
-# 4-bit mlx-community quants sized for a 48 GB M4 Pro.
+# 4-bit mlx-community quant sized for a 48 GB M4 Pro.
 # "abliterated" = refusal direction removed (won't decline tasking).
-# Intended for authorized security work; you own how you use them.
+# Intended for authorized security work; you own how you use it.
 NICKNAMES = {
-    "daredevil": "mlx-community/NeuralDaredevil-8B-abliterated-4bit",       # default, fast 8B
-    "llama": "mlx-community/Meta-Llama-3.1-8B-Instruct-abliterated-4bit",   # 8B fallback
-    "mistral": "mlx-community/Mistral-Small-24B-Instruct-2501-abliterated-4-bit",  # 24B generalist
-    "qwen": "mlx-community/Qwen2.5-Coder-32B-Instruct-abliterated-4bit",    # 32B coder/tooling
+    "qwen": "mlx-community/Qwen2.5-Coder-32B-Instruct-abliterated-4bit",  # 32B coder, abliterated
 }
 REVERSE_NICKNAMES = {v: k for k, v in NICKNAMES.items()}
 
@@ -269,7 +266,7 @@ def cmd_list(args):
         key=lambda r: r.repo_id,
     )
     if not repos:
-        print("No models cached. Try: mlxctl pull daredevil")
+        print("No models cached. Try: mlxctl pull qwen")
         return
     serving = read_info().get("repo") if read_pid() else None
     for r in repos:
