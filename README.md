@@ -77,7 +77,56 @@ printf '#!/bin/sh\nexec uv run --project "%s" python "%s/mlxctl.py" "$@"\n' \
 | `rm <model>` | Delete a cached model (refuses if currently served) |
 | `nicknames` | Show the built-in nickname table |
 
-Serve flags: `--port 8080`, `--host 0.0.0.0`, `--max-tokens 32768`.
+Serve flags: `--port 8080`, `--host 0.0.0.0`, `--max-tokens 8192`.
+
+Memory guards (defaults sized for a 48 GB M4 Pro; lower if you still hit OOM, raise
+if you have headroom): `--prompt-cache-bytes 10G` (hard ceiling on total KV-cache
+memory), `--prompt-cache-size 4` (distinct conversation caches kept resident),
+`--decode-concurrency 8` and `--prompt-concurrency 2` (bound batch memory spikes).
+These are only passed if the installed `mlx-lm` supports them — older versions fall
+back to their own (much higher) defaults with a printed note.
+
+## Configuration
+
+Every default is an environment variable; the built-in value is used unless you set
+one. Resolution order, lowest to highest priority:
+
+```
+built-in default  <  .env file  <  shell environment  <  explicit CLI flag
+```
+
+So `MLXCTL_PORT=9000 mlxctl serve` serves on 9000, but `mlxctl serve --port 8080`
+still wins over the env var. Settings live in `.env` (copy from `.env.example`):
+
+| Variable | Default | What it sets |
+|---|---|---|
+| `MLXCTL_MODEL` | `qwen` | Default model for `serve` with no argument |
+| `MLXCTL_HOST` | `0.0.0.0` | Bind address (`0.0.0.0` needed for `host.docker.internal`) |
+| `MLXCTL_PORT` | `8080` | Server port |
+| `MLXCTL_MAX_TOKENS` | `8192` | Default reply cap when a request omits `max_tokens` |
+| `MLXCTL_PROMPT_CACHE_BYTES` | `10G` | Hard ceiling on total KV-cache memory |
+| `MLXCTL_PROMPT_CACHE_SIZE` | `4` | Distinct conversation caches kept resident |
+| `MLXCTL_DECODE_CONCURRENCY` | `8` | Parallel decodes when batching |
+| `MLXCTL_PROMPT_CONCURRENCY` | `2` | Parallel prefills when batching |
+| `MLXCTL_HEALTH_TIMEOUT` | `300` | Seconds `serve` waits for the model to load |
+| `MLXCTL_STATE_DIR` | `~/.mlxctl` | Where pid/info/log/`models.json` live |
+| `MLXCTL_NICKNAMES_FILE` | `<state-dir>/models.json` | Extra nicknames, merged over built-ins |
+
+### Custom nicknames
+
+The built-in nickname table is just a starting point. Drop a JSON object at
+`~/.mlxctl/models.json` (or point `MLXCTL_NICKNAMES_FILE` elsewhere) to add your own;
+entries override built-ins by name:
+
+```json
+{
+  "qwen-small": "mlx-community/Qwen2.5-Coder-7B-Instruct-4bit",
+  "llama": "mlx-community/Llama-3.3-70B-Instruct-4bit"
+}
+```
+
+(JSON rather than a database on purpose — it's a handful of static `name -> repo`
+strings, so a hand-editable, diffable file beats a schema and a driver.)
 
 ## Nicknames
 
@@ -143,8 +192,17 @@ endpoint.
   model on crash or login would pin half the RAM unasked. Models occupy memory only
   between an explicit `serve` and `stop`. (A `launchd` opt-in may come later.)
 - **One model at a time.** `serve` swaps, never stacks.
-- **`--max-tokens`** defaults to 32768 because mlx-lm's server otherwise caps replies
-  at ~500 tokens.
+- **`--max-tokens`** defaults to 8192. mlx-lm's server otherwise caps replies at ~500
+  tokens, which is too low — but the old 32768 default let a single runaway reply grow
+  one KV cache to ~6-8 GB on a 32B model and tip the machine into OOM. 8192 is a safe
+  default; raise it per request when you actually need a long completion.
+- **Memory guards.** On a 48 GB machine the ~18 GB of weights leave only ~18 GB after
+  macOS's Metal wired-memory limit, and mlx-lm's defaults (unbounded prompt-cache
+  bytes, 10 resident caches, 32-way decode batching) can blow past that and abort the
+  server with an out-of-memory error — especially with several containers sending
+  different prompts. `serve` now caps these (`--prompt-cache-bytes`,
+  `--prompt-cache-size`, `--decode-concurrency`, `--prompt-concurrency`). If you raise
+  the macOS limit with `sudo sysctl iogpu.wired_limit_mb=<mb>` you can relax them.
 - **Binding `0.0.0.0`** is required for `host.docker.internal` to work — but the
   mlx-lm server has only basic security checks, so don't expose the port beyond your
   machine/tailnet. No reverse proxy, no public interfaces.

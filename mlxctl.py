@@ -21,23 +21,102 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-STATE_DIR = Path.home() / ".mlxctl"
+
+def _load_dotenv() -> None:
+    """Load a local .env (HF_TOKEN and any MLXCTL_* settings) before config is read.
+    Best-effort: python-dotenv may be absent under a bare interpreter, and this
+    module is imported before the dependency check runs. A variable already set in
+    the real shell environment always wins — load_dotenv does not override it."""
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+    load_dotenv()
+
+
+_load_dotenv()  # must run before the config block below reads os.environ
+
+
+# ---- configuration --------------------------------------------------------
+# Every setting is an env var with the old hard-coded value as its default, so
+# nothing changes unless you set one. Precedence, lowest to highest:
+#   built-in default  <  .env file  <  shell environment  <  explicit CLI flag
+# (CLI flags win because argparse defaults are seeded from these values and an
+#  explicit flag overrides its default.)
+def _env(key: str, default: str) -> str:
+    """String env var; empty/unset falls back to default."""
+    return os.environ.get(key) or default
+
+
+def _env_int(key: str, default: int) -> int:
+    """Integer env var; unset falls back to default, a bad value warns and falls back."""
+    raw = os.environ.get(key)
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        print(f"warning: {key}={raw!r} is not an integer; using {default}", file=sys.stderr)
+        return default
+
+
+STATE_DIR = Path(_env("MLXCTL_STATE_DIR", str(Path.home() / ".mlxctl"))).expanduser()
 PID_FILE = STATE_DIR / "server.pid"
 INFO_FILE = STATE_DIR / "server.json"
 LOG_FILE = STATE_DIR / "server.log"
 
-DEFAULT_PORT = 8080
-DEFAULT_HOST = "0.0.0.0"
-DEFAULT_MAX_TOKENS = 32768
-DEFAULT_MODEL = "qwen"
-HEALTH_TIMEOUT = 300  # seconds to wait for model load before giving up
+DEFAULT_PORT = _env_int("MLXCTL_PORT", 8080)
+DEFAULT_HOST = _env("MLXCTL_HOST", "0.0.0.0")
+# 32768 made a single runaway reply grow one KV cache to ~6-8 GB on a 32B model.
+# 8192 is a sane *default* cap; clients can still ask for more per request.
+DEFAULT_MAX_TOKENS = _env_int("MLXCTL_MAX_TOKENS", 8192)
+DEFAULT_MODEL = _env("MLXCTL_MODEL", "qwen")
+HEALTH_TIMEOUT = _env_int("MLXCTL_HEALTH_TIMEOUT", 300)  # secs to wait for model load
+
+# Memory guards for a 48 GB M4 Pro. Weights are ~18 GB and macOS only wires down
+# ~75% of RAM (~36 GB) for Metal, leaving ~18 GB. With no ceiling the prompt cache
+# (multiple resident conversation KV caches) and request batching can exceed that
+# and the server aborts with an out-of-memory error. These flags bound it.
+# mlx-lm's own defaults are far higher: unbounded bytes, 10 caches, 32/8 concurrency.
+DEFAULT_PROMPT_CACHE_BYTES = _env("MLXCTL_PROMPT_CACHE_BYTES", "10G")  # total KV ceiling
+DEFAULT_PROMPT_CACHE_SIZE = _env_int("MLXCTL_PROMPT_CACHE_SIZE", 4)    # caches kept resident
+DEFAULT_DECODE_CONCURRENCY = _env_int("MLXCTL_DECODE_CONCURRENCY", 8)  # parallel decodes
+DEFAULT_PROMPT_CONCURRENCY = _env_int("MLXCTL_PROMPT_CONCURRENCY", 2)  # parallel prefills
 
 # 4-bit mlx-community quant sized for a 48 GB M4 Pro.
 # "abliterated" = refusal direction removed (won't decline tasking).
 # Intended for authorized security work; you own how you use it.
-NICKNAMES = {
+_BUILTIN_NICKNAMES = {
     "qwen": "mlx-community/Qwen2.5-Coder-32B-Instruct-abliterated-4bit",  # 32B coder, abliterated
 }
+
+
+def _load_nicknames() -> dict[str, str]:
+    """Built-in nickname table, optionally merged with a user JSON file so the list
+    is editable without touching code. Path: $MLXCTL_NICKNAMES_FILE, else
+    <state-dir>/models.json. File entries override built-ins.
+
+    A flat name->repo JSON object is deliberately chosen over SQLite: it's a handful
+    of static strings, stays hand-editable and diffable, needs no schema or driver,
+    and survives the network hops the same way the model cache does."""
+    nicks = dict(_BUILTIN_NICKNAMES)
+    path = Path(_env("MLXCTL_NICKNAMES_FILE", str(STATE_DIR / "models.json"))).expanduser()
+    try:
+        data = json.loads(path.read_text())
+    except (FileNotFoundError, OSError):
+        return nicks
+    except json.JSONDecodeError as e:
+        print(f"warning: ignoring {path}: invalid JSON ({e})", file=sys.stderr)
+        return nicks
+    if isinstance(data, dict):
+        nicks.update({str(k): str(v) for k, v in data.items()})
+    else:
+        print(f"warning: ignoring {path}: expected a JSON object of nickname -> repo id",
+              file=sys.stderr)
+    return nicks
+
+
+NICKNAMES = _load_nicknames()
 REVERSE_NICKNAMES = {v: k for k, v in NICKNAMES.items()}
 
 
@@ -92,6 +171,25 @@ def read_info() -> dict:
         return {}
 
 
+def server_supported_flags() -> set[str]:
+    """Long-option flags the installed mlx_lm.server actually accepts.
+
+    pyproject only floors the version (mlx-lm>=0.24.0) and there's no lockfile yet,
+    so the memory-guard flags may or may not exist depending on what uv resolved.
+    Probe `--help` once and pass only what's supported (argparse prints help and
+    exits before loading any model, so this is cheap and never touches the network).
+    Returns an empty set on any failure, in which case no guard flags are passed."""
+    try:
+        out = subprocess.run(
+            [sys.executable, "-m", "mlx_lm", "server", "--help"],
+            capture_output=True, text=True, timeout=120,
+            env={**os.environ, "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"},
+        ).stdout
+    except Exception:
+        return set()
+    return {tok.rstrip(",") for tok in out.split() if tok.startswith("--")}
+
+
 def health_ok(port: int) -> bool:
     try:
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/v1/models", timeout=3) as r:
@@ -139,6 +237,29 @@ def cmd_serve(args):
         "--port", str(args.port),
         "--max-tokens", str(args.max_tokens),
     ]
+
+    # Append memory-guard flags, but only the ones this mlx-lm version understands —
+    # an unknown flag would make the server exit immediately with "unrecognized
+    # arguments". A None value means "leave mlx-lm's own default in place".
+    supported = server_supported_flags()
+    guards = [
+        ("--prompt-cache-bytes", args.prompt_cache_bytes),
+        ("--prompt-cache-size", args.prompt_cache_size),
+        ("--decode-concurrency", args.decode_concurrency),
+        ("--prompt-concurrency", args.prompt_concurrency),
+    ]
+    unsupported = []
+    for flag, val in guards:
+        if val is None:
+            continue
+        if flag in supported:
+            cmd += [flag, str(val)]
+        elif supported:  # only warn if the probe actually returned a flag list
+            unsupported.append(flag)
+    if unsupported:
+        print(f"note: installed mlx-lm doesn't support {', '.join(unsupported)} — "
+              f"upgrade for full memory guards (uv lock --upgrade-package mlx-lm)")
+
     env = {**os.environ, "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"}
 
     if args.foreground:
@@ -299,16 +420,6 @@ def cmd_nicknames(args):
         print(f"{nick:<{w}}  {repo}{d}")
 
 
-def load_env():
-    """Load a local .env (HF_TOKEN, etc.) if python-dotenv is present.
-    Does not override variables already set in the real environment."""
-    try:
-        from dotenv import load_dotenv
-    except ImportError:
-        return
-    load_dotenv()
-
-
 def _check_environment():
     """Fail loudly and helpfully if deps aren't here — usually means the script
     was run with a bare interpreter instead of through uv's project env."""
@@ -325,8 +436,7 @@ def _check_environment():
 
 
 def main():
-    load_env()
-    _check_environment()
+    _check_environment()  # .env was already loaded at import, before the config block
     p = argparse.ArgumentParser(
         prog="mlxctl",
         description="Pull and serve MLX models locally for Docker Desktop containers.",
@@ -344,6 +454,18 @@ def main():
                     help="bind address; 0.0.0.0 required for host.docker.internal (default)")
     sp.add_argument("--max-tokens", type=int, default=DEFAULT_MAX_TOKENS,
                     help=f"default reply cap (mlx-lm's own default is 512; ours is {DEFAULT_MAX_TOKENS})")
+    sp.add_argument("--prompt-cache-bytes", default=DEFAULT_PROMPT_CACHE_BYTES,
+                    help=f"hard ceiling on total KV-cache memory, e.g. 10G "
+                         f"(default {DEFAULT_PROMPT_CACHE_BYTES}; mlx-lm default: unbounded)")
+    sp.add_argument("--prompt-cache-size", type=int, default=DEFAULT_PROMPT_CACHE_SIZE,
+                    help=f"distinct conversation KV caches kept resident "
+                         f"(default {DEFAULT_PROMPT_CACHE_SIZE}; mlx-lm default: 10)")
+    sp.add_argument("--decode-concurrency", type=int, default=DEFAULT_DECODE_CONCURRENCY,
+                    help=f"parallel decodes when batching "
+                         f"(default {DEFAULT_DECODE_CONCURRENCY}; mlx-lm default: 32)")
+    sp.add_argument("--prompt-concurrency", type=int, default=DEFAULT_PROMPT_CONCURRENCY,
+                    help=f"parallel prefills when batching "
+                         f"(default {DEFAULT_PROMPT_CONCURRENCY}; mlx-lm default: 8)")
     sp.add_argument("--foreground", action="store_true", help="run attached, for debugging")
     sp.set_defaults(fn=cmd_serve)
 
